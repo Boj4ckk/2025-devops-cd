@@ -1,0 +1,99 @@
+name: CI / CD Java App
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+
+  # --- Tests Java ---
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du projet
+        uses: actions/checkout@v4
+
+      - name: Installation JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Build + Tests
+        run: |
+          ./mvnw clean test
+
+  # --- Vérification build Docker ---
+  docker-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test build image
+        run: docker build -t app-check .
+
+  # --- Build de la documentation ---
+  docs-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Générer javadoc
+        run: ./mvnw javadoc:javadoc
+
+  # --- Déploiement sur Render ---
+  deploy-render:
+    needs: [tests, docker-check]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Déclencher le déploiement Render
+        run: curl -X POST "${{ secrets.RENDER_HOOK }}"
+
+  # --- Push Image Docker Hub ---
+  push-dockerhub:
+    needs: [tests, docker-check]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ secrets.DOCKER_USER }}/java-app:main
+
+  # --- Déploiement javadoc sur Netlify ---
+  publish-docs:
+    needs: [tests, docker-check, docs-check]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build doc
+        run: ./mvnw javadoc:javadoc
+
+      - name: Installer Netlify CLI
+        run: npm install -g netlify-cli
+
+      - name: Déploiement Netlify
+        run: netlify deploy --prod --dir=target/site/apidocs
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE }}
