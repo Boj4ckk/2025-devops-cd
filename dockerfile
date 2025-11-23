@@ -1,16 +1,24 @@
-FROM openjdk:21-jdk-slim AS builder 
+FROM eclipse-temurin:21-jdk AS build
 
 WORKDIR /app
 
-COPY ./src ./pom.xml ./mvmn ./
-RUN mvnw clean package -DskipTests
+
+COPY mvnw .
+COPY .mvn .mvn
+COPY pom.xml .
+
+COPY src ./src
+
+RUN sed -i 's/\r$//' mvnw \
+    && chmod +x mvnw \
+    && ./mvnw clean package -DskipTests
 
 
 
+FROM eclipse-temurin:21-jdk
 
-FROM openjdk:21-jdk-slim as runtime """change image depreciée check discord """
-
-RUN adduser --system --uid 1001 appuser
 WORKDIR /app
-COPY --from=builder --chown=appuser /app/.output /.output
-RUN mvn clean package -DskipTests
+
+COPY --from=build /app/target/*.jar app.jar
+
+CMD ["java", "-jar", "app.jar"]
